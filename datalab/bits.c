@@ -263,35 +263,43 @@ int logicalNeg(int x)
  */
 int howManyBits(int x)
 {
-    int sgn = !(x >> 31);
-    // int f = ~sgn + 1, g = ~!sgn + 1;
-    int y  = (x >> 31) ^ x;
-    int b1 = (y >> 24) & 0xff;
-    int b2 = (y >> 16) & 0xff;
-    int b3 = (y >> 8) & 0xff;
-    int b4 = y & 0xff;  // b[]若为0，则z[]=0xffffffff
+    int MIN = ~1 + 1;
+    int y   = (x >> 31) ^ x;
+    int b1  = (y >> 24);
+    int b2  = (y >> 16);
+    int b3  = (y >> 8);
+    int b4  = y;  // b[]若为0，则z[]=0xffffffff
     int z1 = ~!b1 + 1, z2 = ~!b2 + 1, z3 = ~!b3 + 1, z4, z5, z6, z7, pos;
-    int bx     = (b1) | (z1 & b2) | (z1 & z2 & b3) | (z1 & z2 & z3 & b4);
-    int offset = (~z1 & 24) | (z1 & ~z2 & 16) | (z1 & z2 & ~z3 & 8);
+    int z      = z1 & z2;
+    int bx     = ((b1) | (z1 & b2) | (z & b3) | (z & z3 & b4)) & 0xff;
+    int offset = (~z1 & 24) | (z1 & ~z2 & 16) | (z & ~z3 & 8);
     int a1     = bx >> 7;
-    int a2     = (bx >> 6) & 1;
-    int a3     = (bx >> 5) & 1;
-    int a4     = (bx >> 4) & 1;
-    int a5     = (bx >> 3) & 1;
-    int a6     = (bx >> 2) & 1;
-    int a7     = (bx >> 1) & 1;
-    z1         = ~!a1 + 1;
-    z2         = ~!a2 + 1;
-    z3         = ~!a3 + 1;
-    z4         = ~!a4 + 1;
-    z5         = ~!a5 + 1;
-    z6         = ~!a6 + 1;
-    z7         = ~!a7 + 1;
-    pos = (~z1 & 8) | (z1 & ~z2 & 7) | (z1 & z2 & ~z3 & 6) | (z1 & z2 & z3 & ~z4 & 5) | (z1 & z2 & z3 & z4 & ~z5 & 4) |
-          (z1 & z2 & z3 & z4 & z5 & ~z6 & 3) | (z1 & z2 & z3 & z4 & z5 & z6 & ~z7 & 2) |
-          (z1 & z2 & z3 & z4 & z5 & z6 & z7 & 1);
+    int a2     = bx >> 6;
+    int a3     = bx >> 5;
+    int a4     = bx >> 4;
+    int a5     = bx >> 3;
+    int a6     = bx >> 2;
+    int a7     = bx >> 1;
+    z1         = a1 + MIN;
+    z2         = a2 + MIN;
+    z3         = a3 + MIN;
+    z4         = a4 + MIN;
+    z5         = a5 + MIN;
+    z6         = a6 + MIN;
+    z7         = a7 + MIN;
+    z          = z1 & z2;
+    pos        = (~z1 & 8) | (z1 & ~z2 & 7) | (z & ~z3 & 6);
+    z          = z & z3;
+    pos        = pos | (z & ~z4 & 5);
+    z          = z & z4;
+    pos        = pos | (z & ~z5 & 4);
+    z          = z & z5;
+    pos        = pos | (z & ~z6 & 3);
+    z          = z & z6;
+    pos        = pos | (z & ~z7 & 2);
+    z          = z & z7;
+    pos        = pos | (z & 1);
     // printf("%d[%x], y=%d, sgn=%x: pos=%d off=%d sgn=%d\n", x, x, y, sgn, pos, offset, sgn);
-    // return pos + offset + sgn;
     return pos + offset + !(!x | !(x + 1));
 }
 // float
@@ -308,7 +316,18 @@ int howManyBits(int x)
  */
 unsigned floatScale2(unsigned uf)
 {
-    return 2;
+    int sgn = uf & 0x80000000;
+    int exp = (uf >> 23) & 0xff;
+    int frc = uf & 0x7fffff;
+    if (exp == 0xff) return uf;  // NaN
+    if (exp == 0) {              //是否是规约形式
+        frc <<= 1;
+        if (frc > 0x7fffff) ++exp;
+    }
+    else {
+        ++exp;
+    }
+    return sgn + (((exp)&0xff) << 23) + (frc & 0x7fffff);
 }
 /*
  * floatFloat2Int - Return bit-level equivalent of expression (int) f
@@ -324,7 +343,27 @@ unsigned floatScale2(unsigned uf)
  */
 int floatFloat2Int(unsigned uf)
 {
-    return 2;
+    int sgn = uf & 0x80000000;
+    int exp = (uf >> 23) & 0xff;
+    int frc = uf & 0x7fffff;
+    int x   = 0, i;
+    if (exp == 0) { return 0; }
+    else {
+        if (exp >= 127) x = 1 << (exp - 127);
+        if (exp - 127 >= 31) return 0x80000000u;
+        // printf("exp=%d, frc=%x, x=%x\n", exp, frc, x);
+        for (i = 0; i < 23; ++i)
+            if (exp - 128 - i >= 0) {
+                // printf("frc>>%d=%d pow=%d\n", i, ((frc >> i) & 1), (exp - 128 - i));
+                x += ((frc >> i) & 1) << (exp - 128 - i);
+                if (x < 0) return 0x80000000u;
+            }
+    }
+    // printf("sgn=%x, x=%x\n", sgn, x);
+    if (!sgn)
+        return x;
+    else
+        return -x;
 }
 /*
  * floatPower2 - Return bit-level equivalent of the expression 2.0^x
@@ -341,5 +380,11 @@ int floatFloat2Int(unsigned uf)
  */
 unsigned floatPower2(int x)
 {
-    return 2;
+    if (x < -149)
+        return 0;
+    else if (x > 127)
+        return 0x7f800000;
+    else if (x >= -126) {
+        return (x + 127) << 23;
+    }
 }
