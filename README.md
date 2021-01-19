@@ -26,6 +26,8 @@
 
 ## 2. Bomb Lab
 
+函数调用参数传递：rdi, rsi, rdx, rcx, r8, r9
+
 1. Phase 1
 
 对phasa_1打断点之后发现调用了strcmp函数来进行比较，比较的字符串地址在0x402400，直接查看这一段内存
@@ -77,22 +79,103 @@ b phase_2
 
 4. Phase 4
 
-a=14, b=125
+a=7, b=0
+
+`sscanf(line, "%d %d", &a, &b);`
+
+a=rdx, b=rcx
 
 满足a<15
 
-func4：
+`func4(edx=14, esi=0, edi=a)`：要求func4返回值等于0
 
 ```assembly
-rsp-=8
-eax=edx-esi
+eax=edx-esi=14
 ecx=eax=14
-ecx>>=31
-eax+=ecx
-eax>>=1
-ecx=lea(rsi+rax)
-ecx<=edi?
-ecx>=edi?
+ecx>>=31;逻辑右移，只取符号位，ecx=0
+eax+=ecx;eax=14
+eax>>=1;eax=7
+ecx=lea(rsi+rax)=7
+要求ecx>=edi==a && ecx<=edi==a，即输入为7即可
+```
+
+之后还有一个判断b==0的条件
+
+5. Phase 5
+
+首先判断字符串长度==6，之后进行了查表，将长度代入一个数组中得到目标字符串，最后和flyers相比较，所以反向查表：9, 15, 14, 5, 6, 7，也就是输入的字符串&15的结果IONEFG
+
+```assembly
+开了20个字节的栈
+ecx=s[1]
+rax=0...5
+rsp[rax]=cl=s[0]
+rdx=rsp[rax]&0xf
+edx=arr[edx]
+rsp[rax]=dl
+;arr[]="madu iers nfot vbyl So you think you can stop the bomb with ctrl-c, do you?" "Curses, you\ve fou"
+rsp[10...15]和"flyers"比较
+```
+
+6. Phase 6
+
+仍然调用了读入6个整数的函数，6个整数放在了栈中
+
+每一个数小于等于6，且和前面的数字不相等（即互不相等）
+
+1 2 3 4 5 6
+
+```assembly
+eax=rsp[0]-1
+eax<=5
+
+r12d=1
+ebx=r12d=1
+
+rax=ebx
+eax=rsp[rax]=rsp[1]
+eax!=rsp[0]
+
+ebx++
+ebx<=5?
+
+r13+=4
 
 ```
 
+每个数都变为7-x
+
+```assembly
+rsi=rsp+0x18
+rax=rsp
+ecx=7
+edx=ecx-rsp[0]=7-rsp[0]
+rsp[0]=edx=7-rsp[0]
+rax+=4
+
+```
+
+```assembly
+esi=0
+ecx=rsp[0]
+ecx<=1?NO;由于每个数都小于等于5，所以7-x必定大于等于2
+eax=1
+edx=0x6032d0
+rdx=arr+8=0x6032d8
+eax++
+eax==ecx?
+```
+
+关键在于链表：
+
+```
+(gdb) x/12xg 0x6032d0
+0x6032d0 <node1>:	0x000000010000014c	0x00000000006032e0
+0x6032e0 <node2>:	0x00000002000000a8	0x00000000006032f0
+0x6032f0 <node3>:	0x000000030000039c	0x0000000000603300
+0x603300 <node4>:	0x00000004000002b3	0x0000000000603310
+0x603310 <node5>:	0x00000005000001dd	0x0000000000603320
+0x603320 <node6>:	0x00000006000001bb	0x0000000000000000
+```
+
+发现是比较后面那8位，所以顺序是3,4,5,6,1,2；由于前面进行了7-x操作，所以答案是`4 3 2 1 6 5`
